@@ -131,12 +131,12 @@ class DataProcessor(object):
         self._write_jsonl(data, save_path)
     
     def get_max_ppl_seq(self, nums, min_len = 3):
-        if nums < min_len:
+        if len(nums) < min_len:
             return [-1, -1]
         max_average = 0
         for start_idx in range(len(nums)-min_len):
-            for end_idx in range(i+min_len, len(nums)):
-                average_num = sum(nums[start_idx:end_idx])
+            for end_idx in range(start_idx+min_len, len(nums)):
+                average_num = sum(nums[start_idx:end_idx])/(end_idx-start_idx)
                 if average_num > max_average:
                     max_average = average_num
                     res = [start_idx, end_idx]
