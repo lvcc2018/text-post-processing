@@ -22,7 +22,7 @@ from transformers import (
 )
 from tqdm import tqdm
 
-device = 'cuda:0'
+device = 'cuda:4'
 
 class TagDataset(Dataset):
     def __init__(self, data_path) -> None:
@@ -41,12 +41,11 @@ def finetune():
     model = BertForTokenClassification.from_pretrained('bert-base-chinese', config=config)
     tokenizer = BertTokenizer.from_pretrained('bert-base-chinese', config=config)
 
-    if torch.cuda.is_available():
-        model.cuda()
+    model.to(device)
     
-    train_dataset = TagDataset('./data/train.jsonl')
-    valid_dataset = TagDataset('./data/valid.jsonl')
-    test_dataset = TagDataset('./data/test.jsonl')
+    train_dataset = TagDataset('/home/lvcc/text-post-processing/data/contrastive_search_to_ground_truth/train_pseudo.txt')
+    valid_dataset = TagDataset('/home/lvcc/text-post-processing/data/contrastive_search_to_ground_truth/val_pseudo.txt')
+    test_dataset = TagDataset('/home/lvcc/text-post-processing/data/contrastive_search_to_ground_truth/test_pseudo.txt')
 
     def collate_fn(batch):
         prefix = [i['prefix'] for i in batch]
@@ -58,7 +57,9 @@ def finetune():
         for i in range(len(batch)):
             prefix_length = len(tokenizer(prefix[i])['input_ids'])
             infix_length = len(tokenizer(infix[i])['input_ids'])
+            postfix_length = len(tokenizer(postfix[i])['input_ids'])
             input['labels'][i][prefix_length-1:prefix_length+infix_length-3] = 1
+            input['labels'][i][prefix_length+infix_length+postfix_length-4:] = -100
         return input
 
     train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, collate_fn=collate_fn)
@@ -67,9 +68,10 @@ def finetune():
 
     total_steps = len(train_dataloader) * 10
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0.1*total_steps, num_training_steps=total_steps)
 
+    model.to(device)
     for epoch in range(10):
         epoch_loss = 0.
         iter_loss = 0.
@@ -90,7 +92,7 @@ def finetune():
                 epoch_loss += iter_loss
         epoch_loss/=len(train_dataloader)
         print('Epoch {} loss: {}'.format(epoch, epoch_loss))
-        model.save_pretrained('./model/epoch_{}.pt'.format(epoch))
+        model.save_pretrained('/home/lvcc/text-post-processing/model/epoch_{}.pt'.format(epoch))
         model.eval()
         with torch.no_grad():
             correct = 0.
@@ -100,7 +102,7 @@ def finetune():
                 logits = model(**input).logits
                 pred = logits.argmax(dim=-1)
                 correct += (pred==input['labels']).sum().item()
-                total += input['labels'].numel()
+                total += (input['labels']!=-100).sum().item()
             print('Valid Acc: {}'.format(correct/total))
 
 if __name__ == '__main__':
