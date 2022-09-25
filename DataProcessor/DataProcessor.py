@@ -65,8 +65,8 @@ class DataProcessor(object):
     def random_span_mask(self, text):
         """Span masks randomly for the origin text.
         """
-        span_len = random.randint(1, round((len(text)-10)*0.5))
-        start_idx = random.randint(10, len(text)-span_len)
+        span_len = random.randint(round((len(text)-20)*0.1), round((len(text)-20)*0.3))
+        start_idx = random.randint(20, len(text)-span_len)
         source = [text[:start_idx], text[start_idx+span_len:]]
         target = text[start_idx:start_idx+span_len]
         return span_len, source, target
@@ -75,6 +75,15 @@ class DataProcessor(object):
         """Formulate the text into training instance of CPM-3
         """
         return {'source': source, 'target': target, 'mode': mode}
+    
+    def generate_pc_pseudo_data_random(self, source, target):
+        data = self._read_jsonl(source)
+        res = []
+        for i in data:
+            text = i['source'][0] + i['target']
+            l, s, t = self.random_span_mask(text)
+            res.append(self.process_text(s, t, 'lm'))
+        self._write_jsonl(res, target)
         
     def generate_pc_pseudo_data_sent(self, source, target):
         data = self._read_txt(source)
@@ -175,9 +184,9 @@ class DataProcessor(object):
 
 if __name__ == '__main__':
     dp = DataProcessor()
-    for i in ['train', 'val', 'test']:
+    for i in ['train','val','test']:
         dp.process_detector_data_contrastive(
-            f'/home/lvcc/CPM-3/data/pc_training_data_long_sent/data_{i}.txt',
-            f'/home/lvcc/CPM-3/data/pc_result_long_sent/{i}_contras.txt',
-            f'/home/lvcc/text-post-processing/data/contrastive_search_to_ground_truth/{i}_pseudo.txt'
+            f'/home/lvcc/CPM-3/data/pc_training_data_random/{i}.txt',
+            f'/home/lvcc/CPM-3/data/pc_result_random/{i}_contrastive.txt',
+            f'/home/lvcc/text-post-processing/data/random_contrastive_to_ground_truth/{i}.txt'
         )
