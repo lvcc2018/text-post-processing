@@ -22,7 +22,7 @@ from transformers import (
 )
 from tqdm import tqdm
 
-device = 'cuda:0'
+device = 'cuda:5'
 
 class TagDataset(Dataset):
     def __init__(self, data_path) -> None:
@@ -46,6 +46,21 @@ class RealTagDataset(Dataset):
     def __getitem__(self, index):
         return self.data[index]
 
+class TagDataset2(Dataset):
+    def __init__(self, data):
+        self.data = []
+        for i in range(len(data)):
+            d = data[i].split('$')
+            if len(d) != 3:
+                continue
+            self.data.append({'prefix':d[0],'infix':d[1], 'postfix':d[2]})
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, index):
+        return self.data[index]
+
 def finetune():
     config = BertConfig.from_pretrained('bert-base-chinese')
     config.num_labels=2
@@ -54,10 +69,15 @@ def finetune():
 
     model.to(device)
     
-    train_dataset = TagDataset('/home/lvcc/text-post-processing/data/random_contrastive_to_ground_truth/train.txt')
-    valid_dataset = TagDataset('/home/lvcc/text-post-processing/data/random_contrastive_to_ground_truth/val.txt')
-    test_dataset = TagDataset('/home/lvcc/text-post-processing/data/random_contrastive_to_ground_truth/test.txt')
-    real_test_dataset = RealTagDataset('/home/lvcc/CPM-3/data/lm_result/test_final.txt')
+    train_dataset = TagDataset('/home/lvcc/data/training/train.txt')[:20000]
+    valid_dataset = TagDataset('/home/lvcc/data/training/valid.txt')
+    test_dataset = TagDataset('/home/lvcc/data/training/real_test_rmrb.txt')
+    # real_test_dataset = RealTagDataset('/home/lvcc/CPM-3/data/lm_result/test_final.txt')
+    # data = [i.strip() for i in open('/home/lvcc/data/result_lm/新闻_标注.txt').readlines()]
+    # train_dataset = TagDataset2(data[20:])
+    # valid_dataset = TagDataset2(data[:10])
+    # # test_dataset = TagDataset2(data[10:20])
+    # test_dataset = TagDataset2(data[10:20])
 
     def collate_fn(batch):
         prefix = [i['prefix'] for i in batch]
@@ -75,7 +95,6 @@ def finetune():
         return input
     
     def real_collate_fn(batch):
-
         input = tokenizer(batch, padding=True, truncation=True, return_tensors='pt')
         input['labels'] = torch.zeros_like(input['input_ids'])
         for i in range(len(batch)):
@@ -85,17 +104,16 @@ def finetune():
     train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, collate_fn=collate_fn)
     valid_dataloader = DataLoader(valid_dataset, batch_size=16, shuffle=True, collate_fn=collate_fn)
     test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False, collate_fn=collate_fn)
-    real_test_dataloader = DataLoader(real_test_dataset, batch_size = 32, shuffle=False, collate_fn=real_collate_fn)
+    # real_test_dataloader = DataLoader(real_test_dataset, batch_size = 32, shuffle=False, collate_fn=real_collate_fn)
     total_steps = len(train_dataloader) * 10
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0.1*total_steps, num_training_steps=total_steps)
+    # scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0.1*total_steps, num_training_steps=total_steps)
 
     model.to(device)
     for epoch in range(0):
         epoch_loss = 0.
         iter_loss = 0.
-        
         model.train()
         with tqdm(total=len(train_dataloader)) as t:
             for idx, input in enumerate(train_dataloader):
@@ -104,7 +122,7 @@ def finetune():
                 loss = model(**input).loss
                 loss.backward()
                 optimizer.step()
-                scheduler.step()
+                # scheduler.step()
                 optimizer.zero_grad()
                 iter_loss = loss.item()
                 t.set_postfix(loss=iter_loss)
@@ -128,14 +146,16 @@ def finetune():
                 torch.save(model, '/home/lvcc/text-post-processing/best_eval.pt')
                 best_acc = correct/total
     model = torch.load('/home/lvcc/text-post-processing/best_eval.pt')
-    f = open('/home/lvcc/text-post-processing/result_real.txt','w')
+    f = open('/home/lvcc/text-post-processing/result_rmrb.txt','w')
     with torch.no_grad():
         correct = 0.
         total = 0.
-        for idx, input in enumerate(real_test_dataloader):
+        for idx, input in enumerate(test_dataloader):
             input = input.to(device)
             logits = model(**input).logits
             pred = logits.argmax(dim=-1)
+            print(pred)
+            print(input.labels)
             correct += (pred==input['labels']).sum().item()
             total += (input['labels']!=-100).sum().item()
             for i in range(input['labels'].shape[0]):

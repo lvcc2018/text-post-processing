@@ -12,7 +12,9 @@ import numpy as np
 import json
 import os
 import re
-
+import sys
+import matplotlib.pyplot as plt
+import heapq
 
 class DataProcessor(object):
     """Process the training data.
@@ -86,24 +88,28 @@ class DataProcessor(object):
         self._write_jsonl(res, target)
         
     def generate_pc_pseudo_data_sent(self, source, target):
-        data = self._read_txt(source)
+        data = self._read_jsonl(source)
+        data = [i['source'][0]+ i['target'] for i in data]
         res = []
         for i in data:
-            split = [j for j in i if j=='。']
-            i = re.split('[。]', i)[:-1]
+            split = [j for j in i if j in '，。']
+            i = re.split('[，。]', i)
+            if len(i) > len(split):
+                i = i[:-1]
             assert(len(split) == len(i))
-            idx = random.randint(0,len(i)-1)
-            prefix = ''
-            infix = ''
-            postfix = ''
-            for j in range(len(split)):
-                if j == idx:
-                    infix += i[j]+split[j]
-                elif len(infix) > 0:
-                    postfix += i[j]+split[j]
-                else:
-                    prefix += i[j]+split[j]
-            res.append(self.process_text([prefix, postfix], infix, 'lm'))
+            if len(i) > 1:
+                idx = random.randint(0,len(i)-1)
+                prefix = ''
+                infix = ''
+                postfix = ''
+                for j in range(len(split)):
+                    if j == idx:
+                        infix += i[j]+split[j]
+                    elif len(infix) > 0:
+                        postfix += i[j]+split[j]
+                    else:
+                        prefix += i[j]+split[j]
+                res.append(self.process_text([prefix, postfix], infix, 'lm'))
         self._write_jsonl(res, target)
 
 
@@ -162,14 +168,16 @@ class DataProcessor(object):
         self._write_jsonl(result, target_file)
     
     def process_detector_data_contrastive(self, source_file, pred_file, target_file):
-        source = self._read_jsonl(source_file)
         pred = self._read_txt(pred_file)
+        source = self._read_jsonl(source_file)[:len(pred)]
         assert(len(source) == len(pred))
         result = []
         for i in range(len(source)):
             prefix = source[i]['source'][0]
             postfix = source[i]['source'][1]
-            infix = pred[i][:-len(postfix)]
+            infix = pred[i]
+            if len(postfix) != 0:
+                infix = infix[:-len(postfix)]
             target = source[i]['target']
             result.append(
                 {
@@ -182,11 +190,45 @@ class DataProcessor(object):
         self._write_jsonl(result, target_file)
 
 
+    def show_std_ppl(self, data_path, idx):
+        data = self._read_jsonl(data_path)
+        print(data[idx]['prefix'])
+        for i in range(len(data[idx]['ppl'])):
+            print(data[idx]['target_logits'][i],'\t',data[idx]['ppl'][i], '\t', data[idx]['tokens'][i])
+    
+    def calculate_var(self, data_path, prefix = 'news_'):
+        target_file_path = os.path.join(data_path, 'res.txt')
+        res = []
+        data = []
+        for i in range(10):
+            source_file_path = os.path.join(data_path, prefix + f'{i}.txt')
+            data.append(self._read_jsonl(source_file_path))
+        for i in range(100):
+            tmp_logit = [[] for i in range(len(data[0][i]['token_idx']))]
+            for j in range(len(data)):
+                for k in range(len(data[j][i]['token_idx'])):
+                    tmp_logit[k].append(data[j][i]['token_idx'][k])
+            tmp_var = [np.var(i) for i in tmp_logit]
+            res.append({
+                'tokens': data[0][i]['tokens'],
+                'prefix': data[0][i]['prefix'],
+                'var': tmp_var
+            })
+        self._write_jsonl(res, target_file_path)
+
+    def show_tokens(self, data_path, idx, ratio=0.3):
+        data = self._read_jsonl(data_path)[idx]
+        assert(len(data['tokens']) == len(data['var']))
+        mask_len = round(ratio * len(data['tokens']))
+        max_nums = heapq.nlargest(mask_len,data['var'])
+        max_nums_idx = [data['var'].index(i) for i in max_nums]
+        print(data['prefix'])
+        for i in range(len(data['var'])):
+            print(data['tokens'][i],'\t', data['var'][i], '\t', 1 if i in max_nums_idx else 0, '\n')
+
+
+
 if __name__ == '__main__':
     dp = DataProcessor()
-    for i in ['train','val','test']:
-        dp.process_detector_data_contrastive(
-            f'/home/lvcc/CPM-3/data/pc_training_data_random/{i}.txt',
-            f'/home/lvcc/CPM-3/data/pc_result_random/{i}_contrastive.txt',
-            f'/home/lvcc/text-post-processing/data/random_contrastive_to_ground_truth/{i}.txt'
-        )
+    # dp.calculate_var('/home/lvcc/text-post-processing/data/output/logits_calculate/storys', 'story_')
+    dp.show_tokens('/home/lvcc/text-post-processing/data/output/logits_calculate/storys/res.txt', 0)
